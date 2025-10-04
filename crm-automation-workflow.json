@@ -1,0 +1,899 @@
+{
+  "name": "CRM Lead Automation System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-capture",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-website-form",
+      "name": "Webhook: Website Form",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "lead-capture-webhook",
+      "notes": "Captures leads from website contact forms via POST request"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "from": "",
+          "subject": "",
+          "labelIds": [
+            "Label_Leads"
+          ]
+        },
+        "format": "simple"
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail: Email Lead Capture",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        500
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "1",
+          "name": "Gmail account"
+        }
+      },
+      "notes": "Monitors Gmail for emails with 'Leads' label (configure Gmail filter for auto-labeling)"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "formId": "={{$env.GOOGLE_FORM_ID}}",
+        "event": "formSubmit"
+      },
+      "id": "google-forms-trigger",
+      "name": "Google Forms: Lead Submission",
+      "type": "n8n-nodes-base.googleFormTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        700
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "2",
+          "name": "Google API"
+        }
+      },
+      "notes": "Captures leads submitted via Google Forms"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize lead data from multiple sources with validation\nconst items = $input.all();\nconst normalizedLeads = [];\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\nfor (const item of items) {\n  let lead = {};\n  const source = item.json.source || 'unknown';\n  \n  // Normalize based on source\n  if (source === 'webhook' || item.json.name) {\n    // Website form data\n    lead = {\n      name: item.json.name || '',\n      email: item.json.email || '',\n      phone: item.json.phone || '',\n      company: item.json.company || '',\n      message: item.json.message || '',\n      source: 'Website Form'\n    };\n  } else if (item.json.from) {\n    // Gmail data\n    lead = {\n      name: item.json.from.split('<')[0].trim(),\n      email: item.json.from.match(/<(.+)>/)?.[1] || item.json.from,\n      phone: '',\n      company: '',\n      message: item.json.snippet || item.json.textPlain || '',\n      source: 'Email Inquiry'\n    };\n  } else {\n    // Google Forms data\n    const responses = item.json.responses || {};\n    lead = {\n      name: responses['Full Name'] || responses['Name'] || '',\n      email: responses['Email'] || responses['Email Address'] || '',\n      phone: responses['Phone'] || responses['Phone Number'] || '',\n      company: responses['Company'] || responses['Company Name'] || '',\n      message: responses['Message'] || responses['Comments'] || '',\n      source: 'Google Form'\n    };\n  }\n  \n  // Add metadata\n  lead.timestamp = new Date().toISOString();\n  lead.lead_id = `LEAD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;\n  \n  // Clean up empty fields\n  lead.email = lead.email.toLowerCase().trim();\n  lead.name = lead.name.trim();\n  \n  // Validation\n  lead.validation_error = null;\n  lead.requires_review = false;\n  \n  if (!lead.email || !emailRegex.test(lead.email)) {\n    lead.validation_error = 'Invalid email format';\n    lead.requires_review = true;\n  }\n  \n  if (!lead.name || lead.name.length < 2) {\n    lead.validation_error = lead.validation_error ? \n      lead.validation_error + ' | Name too short' : 'Name too short';\n    lead.requires_review = true;\n  }\n  \n  normalizedLeads.push({ json: lead });\n}\n\nreturn normalizedLeads;"
+      },
+      "id": "normalize-data",
+      "name": "Normalize Lead Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        500
+      ],
+      "notes": "Standardizes lead data from all sources into consistent format"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.requires_review}}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "validation-check",
+      "name": "Data Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        580,
+        500
+      ],
+      "notes": "Routes invalid leads to error sheet for manual review"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads_Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{$json.timestamp}}",
+            "Lead ID": "={{$json.lead_id}}",
+            "Name": "={{$json.name}}",
+            "Email": "={{$json.email}}",
+            "Phone": "={{$json.phone}}",
+            "Company": "={{$json.company}}",
+            "Source": "={{$json.source}}",
+            "Message": "={{$json.message}}",
+            "Validation Error": "={{$json.validation_error}}",
+            "Status": "Requires Review"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-errors",
+      "name": "Google Sheets: Log Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        780,
+        650
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "2",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Logs invalid leads to error sheet for manual review"
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "get",
+        "email": "={{$json.email}}",
+        "additionalFields": {}
+      },
+      "id": "hubspot-check-exists",
+      "name": "HubSpot: Check if Lead Exists",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [
+        680,
+        500
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "3",
+          "name": "HubSpot account"
+        }
+      },
+      "continueOnFail": true,
+      "alwaysOutputData": true,
+      "notes": "Searches CRM for existing contact by email"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$node['HubSpot: Check if Lead Exists'].json.id}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "if-lead-exists",
+      "name": "Lead Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        900,
+        500
+      ],
+      "notes": "Routes workflow based on whether contact exists in CRM"
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "update",
+        "contactId": "={{$node['HubSpot: Check if Lead Exists'].json.id}}",
+        "updateFields": {
+          "customProperties": {
+            "property": [
+              {
+                "name": "last_contact_date",
+                "value": "={{$json.timestamp}}"
+              },
+              {
+                "name": "lead_source",
+                "value": "={{$json.source}}"
+              },
+              {
+                "name": "latest_message",
+                "value": "={{$json.message}}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "hubspot-update",
+      "name": "HubSpot: Update Existing Lead",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        400
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "3",
+          "name": "HubSpot account"
+        }
+      },
+      "notes": "Updates existing contact with new interaction details"
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "create",
+        "email": "={{$json.email}}",
+        "additionalFields": {
+          "firstName": "={{$json.name.split(' ')[0]}}",
+          "lastName": "={{$json.name.split(' ').slice(1).join(' ')}}",
+          "phone": "={{$json.phone}}",
+          "company": "={{$json.company}}",
+          "lifecycleStage": "lead",
+          "customProperties": {
+            "property": [
+              {
+                "name": "lead_source",
+                "value": "={{$json.source}}"
+              },
+              {
+                "name": "lead_status",
+                "value": "New Lead"
+              },
+              {
+                "name": "first_contact_date",
+                "value": "={{$json.timestamp}}"
+              },
+              {
+                "name": "initial_message",
+                "value": "={{$json.message}}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "hubspot-create",
+      "name": "HubSpot: Create New Lead",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        600
+      ],
+      "credentials": {
+        "hubspotApi": {
+          "id": "3",
+          "name": "HubSpot account"
+        }
+      },
+      "notes": "Creates new contact in CRM with 'New Lead' status"
+    },
+    {
+      "parameters": {},
+      "id": "merge-crm-paths",
+      "name": "Merge CRM Paths",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        1340,
+        500
+      ],
+      "notes": "Combines update and create paths back together"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.source}}",
+              "operation": "equal",
+              "value2": "Website Form"
+            }
+          ]
+        }
+      },
+      "id": "check-webhook-source",
+      "name": "Is Website Form?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1460,
+        500
+      ],
+      "notes": "Check if lead came from webhook to send quick response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"lead_id\": $json.lead_id, \"message\": \"Lead captured successfully\" } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "webhook-quick-response",
+      "name": "Webhook Quick Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        400
+      ],
+      "notes": "Sends immediate HTTP 200 response to website form"
+    },
+    {
+      "parameters": {},
+      "id": "merge-response-paths",
+      "name": "Merge After Response",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        1600,
+        500
+      ],
+      "notes": "Recombines webhook and non-webhook paths after quick response"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "fromEmail": "={{$env.SENDER_EMAIL}}",
+        "toEmail": "={{$json.email}}",
+        "subject": "Thank you for reaching out!",
+        "emailType": "html",
+        "message": "<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background-color: #0066cc; color: white; padding: 20px; text-align: center; }\n    .content { background-color: #f9f9f9; padding: 30px; }\n    .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>Welcome!</h1>\n    </div>\n    <div class=\"content\">\n      <p>Hi {{$json.name.split(' ')[0]}},</p>\n      <p>Thank you for reaching out to us! We've received your inquiry and our team is excited to help you.</p>\n      <p><strong>What happens next?</strong></p>\n      <ul>\n        <li>Our team will review your request within the next few hours</li>\n        <li>A dedicated specialist will contact you within 24 hours</li>\n        <li>We'll provide personalized solutions tailored to your needs</li>\n      </ul>\n      <p>If you have any urgent questions, feel free to reply to this email and we'll respond promptly.</p>\n      <p>Best regards,<br>The Sales Team</p>\n    </div>\n    <div class=\"footer\">\n      <p>This is an automated confirmation message.</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "gmail-auto-reply",
+      "name": "Gmail: Send Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1560,
+        400
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "1",
+          "name": "Gmail account"
+        }
+      },
+      "continueOnFail": true,
+      "notes": "Sends automated welcome email to new lead"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{$env.SLACK_CHANNEL_ID}}",
+          "mode": "id"
+        },
+        "text": "=*New Lead Captured!*\n\n*Name:* {{$json.name}}\n*Email:* {{$json.email}}\n*Phone:* {{$json.phone || 'Not provided'}}\n*Company:* {{$json.company || 'Not provided'}}\n*Source:* {{$json.source}}\n*Lead ID:* {{$json.lead_id}}\n\n*Message:*\n```{{$json.message}}```\n\n*Action Required:* Follow up within 24 hours\n*Timestamp:* {{$json.timestamp}}",
+        "otherOptions": {}
+      },
+      "id": "slack-notification",
+      "name": "Slack: Send Team Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1560,
+        500
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "4",
+          "name": "Slack account"
+        }
+      },
+      "continueOnFail": true,
+      "notes": "Notifies sales team in Slack with lead details"
+    },
+    {
+      "parameters": {
+        "resource": "task",
+        "operation": "create",
+        "workspaceId": {
+          "__rl": true,
+          "value": "={{$env.ASANA_WORKSPACE_ID}}",
+          "mode": "id"
+        },
+        "name": "=Call {{$json.name}} about inquiry",
+        "otherProperties": {
+          "notes": "=Lead Source: {{$json.source}}\nEmail: {{$json.email}}\nPhone: {{$json.phone}}\nCompany: {{$json.company}}\n\nMessage:\n{{$json.message}}\n\nLead ID: {{$json.lead_id}}",
+          "dueOn": "={{DateTime.now().plus({days: 1}).toISODate()}}",
+          "assignee": "={{$env.ASANA_ASSIGNEE_ID}}"
+        }
+      },
+      "id": "asana-create-task",
+      "name": "Asana: Create Follow-up Task",
+      "type": "n8n-nodes-base.asana",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        600
+      ],
+      "credentials": {
+        "asanaApi": {
+          "id": "5",
+          "name": "Asana account"
+        }
+      },
+      "notes": "Creates task for sales rep to follow up with lead"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{$json.timestamp}}",
+            "Lead ID": "={{$json.lead_id}}",
+            "Name": "={{$json.name}}",
+            "Email": "={{$json.email}}",
+            "Phone": "={{$json.phone}}",
+            "Company": "={{$json.company}}",
+            "Source": "={{$json.source}}",
+            "Message": "={{$json.message}}",
+            "Status": "New"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-append",
+      "name": "Google Sheets: Log Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1560,
+        700
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "2",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Appends lead data to tracking spreadsheet"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 2"
+            }
+          ]
+        }
+      },
+      "id": "weekly-schedule",
+      "name": "Schedule: Weekly Report",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        1000
+      ],
+      "notes": "Triggers every Tuesday at 9 AM for weekly report generation (captures full week including weekend)"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "options": {
+          "range": "A:I"
+        }
+      },
+      "id": "sheets-get-weekly",
+      "name": "Google Sheets: Get Weekly Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        460,
+        1000
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "2",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Retrieves all leads from the past week"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate weekly report data\nconst items = $input.all();\nconst now = new Date();\nconst oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\n\n// Filter leads from last week\nconst weeklyLeads = items.filter(item => {\n  const timestamp = new Date(item.json.Timestamp);\n  return timestamp >= oneWeekAgo;\n});\n\n// Calculate statistics\nconst totalLeads = weeklyLeads.length;\nconst sourceBreakdown = {};\nconst statusBreakdown = {};\n\nweeklyLeads.forEach(lead => {\n  const source = lead.json.Source || 'Unknown';\n  const status = lead.json.Status || 'New';\n  \n  sourceBreakdown[source] = (sourceBreakdown[source] || 0) + 1;\n  statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;\n});\n\n// Format report data\nconst report = {\n  reportDate: now.toISOString().split('T')[0],\n  weekStart: oneWeekAgo.toISOString().split('T')[0],\n  weekEnd: now.toISOString().split('T')[0],\n  totalLeads,\n  sourceBreakdown,\n  statusBreakdown,\n  leads: weeklyLeads.map(l => l.json),\n  summary: `Generated ${totalLeads} new leads this week`\n};\n\nreturn [{ json: report }];"
+      },
+      "id": "calculate-stats",
+      "name": "Calculate Weekly Statistics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        1000
+      ],
+      "notes": "Analyzes weekly lead data and calculates key metrics"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "title": "=Weekly Lead Report - {{$json.weekStart}} to {{$json.weekEnd}}",
+        "bodyContent": "=# Weekly Lead Generation Report\n\n**Report Period:** {{$json.weekStart}} to {{$json.weekEnd}}\n**Generated:** {{$json.reportDate}}\n\n---\n\n## Executive Summary\n\n- **Total Leads Generated:** {{$json.totalLeads}}\n\n### Lead Sources\n{{Object.entries($json.sourceBreakdown).map(([source, count]) => `- ${source}: ${count} leads`).join('\\n')}}\n\n### Lead Status\n{{Object.entries($json.statusBreakdown).map(([status, count]) => `- ${status}: ${count} leads`).join('\\n')}}\n\n---\n\n## Detailed Lead List\n\n{{$json.leads.map((lead, i) => `\n### ${i + 1}. ${lead.Name}\n- **Email:** ${lead.Email}\n- **Phone:** ${lead.Phone || 'N/A'}\n- **Company:** ${lead.Company || 'N/A'}\n- **Source:** ${lead.Source}\n- **Status:** ${lead.Status}\n- **Lead ID:** ${lead['Lead ID']}\n- **Message:** ${lead.Message}\n`).join('\\n')}}\n\n---\n\n## Next Steps\n\n1. Review all 'New' status leads and assign to sales team\n2. Follow up on pending leads from previous weeks\n3. Update lead statuses in CRM\n4. Schedule calls with high-priority prospects\n\n*This report was automatically generated by the CRM Automation System.*",
+        "options": {}
+      },
+      "id": "docs-create-report",
+      "name": "Google Docs: Create Report",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        900,
+        1000
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "2",
+          "name": "Google Docs account"
+        }
+      },
+      "notes": "Generates formatted PDF report in Google Docs"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "fromEmail": "={{$env.SENDER_EMAIL}}",
+        "toEmail": "={{$env.MANAGER_EMAIL}}",
+        "subject": "=Weekly Lead Report: {{$node['Calculate Weekly Statistics'].json.totalLeads}} New Leads",
+        "emailType": "html",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 700px; margin: 0 auto; padding: 20px; }\n    .header { background-color: #0066cc; color: white; padding: 20px; }\n    .stats { display: flex; justify-content: space-around; padding: 20px; background: #f0f0f0; }\n    .stat-box { text-align: center; }\n    .stat-number { font-size: 32px; font-weight: bold; color: #0066cc; }\n    .content { padding: 20px; }\n    ul { padding-left: 18px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>Weekly Lead Report</h1>\n      <p>{{$json.weekStart}} to {{$json.weekEnd}}</p>\n    </div>\n    <div class=\"stats\">\n      <div class=\"stat-box\">\n        <div class=\"stat-number\">{{$json.totalLeads}}</div>\n        <div>Total Leads</div>\n      </div>\n    </div>\n    <div class=\"content\">\n      <h2>Lead Sources</h2>\n      <ul>\n        {{Object.entries($json.sourceBreakdown).map(([source, count]) => `<li><strong>${source}:</strong> ${count} leads</li>`).join('')}}\n      </ul>\n      \n      <h2>Performance Summary</h2>\n      <p>This week, we successfully captured {{$json.totalLeads}} leads through our automated system. All leads have been:</p>\n      <ul>\n        <li>Added to HubSpot CRM</li>\n        <li>Sent automated welcome emails</li>\n        <li>Created follow-up tasks in Asana</li>\n        <li>Logged in the tracking spreadsheet</li>\n      </ul>\n      \n      <p><strong>The detailed report PDF is attached.</strong></p>\n      \n      <p>Best regards,<br>CRM Automation System</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {
+          "attachments": [
+            {
+              "binaryPropertyName": "reportPdf"
+            }
+          ]
+        }
+      },
+      "id": "gmail-send-report",
+      "name": "Gmail: Send Weekly Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        1000
+      ],
+      "credentials": {
+        "gmailOAuth2Api": {
+          "id": "1",
+          "name": "Gmail account"
+        }
+      },
+      "notes": "Emails weekly report to manager with statistics and PDF attachment"
+    },
+    {
+      "parameters": {
+        "fileId": {
+          "mode": "id",
+          "__rl": true,
+          "value": "={{$node['Google Docs: Create Report'].json.documentId}}"
+        },
+        "operation": "download",
+        "resource": "file",
+        "options": {
+          "binaryPropertyName": "reportPdf",
+          "fileName": "=Weekly-Lead-Report-{{$node['Calculate Weekly Statistics'].json.weekStart}}-{{$node['Calculate Weekly Statistics'].json.weekEnd}}.pdf",
+          "googleFileConversion": {
+            "conversion": {
+              "docsToFormat": "application/pdf"
+            }
+          }
+        }
+      },
+      "id": "drive-download-report",
+      "name": "Google Drive: Download Report",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1040,
+        1000
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "2",
+          "name": "Google Drive account"
+        }
+      },
+      "notes": "Exports the weekly report document to PDF for email attachment"
+    }
+  ],
+  "connections": {
+    "Webhook: Website Form": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: Email Lead Capture": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Forms: Lead Submission": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lead Data": {
+      "main": [
+        [
+          {
+            "node": "Data Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Valid?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Check if Lead Exists",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Sheets: Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Check if Lead Exists": {
+      "main": [
+        [
+          {
+            "node": "Lead Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Exists?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Update Existing Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot: Create New Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Update Existing Lead": {
+      "main": [
+        [
+          {
+            "node": "Merge CRM Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Create New Lead": {
+      "main": [
+        [
+          {
+            "node": "Merge CRM Paths",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge CRM Paths": {
+      "main": [
+        [
+          {
+            "node": "Is Website Form?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Website Form?": {
+      "main": [
+        [
+          {
+            "node": "Webhook Quick Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge After Response",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Webhook Quick Response": {
+      "main": [
+        [
+          {
+            "node": "Merge After Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge After Response": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Send Welcome Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Slack: Send Team Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Asana: Create Follow-up Task",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheets: Log Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule: Weekly Report": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Get Weekly Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets: Get Weekly Leads": {
+      "main": [
+        [
+          {
+            "node": "Calculate Weekly Statistics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Weekly Statistics": {
+      "main": [
+        [
+          {
+            "node": "Google Docs: Create Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Docs: Create Report": {
+      "main": [
+        [
+          {
+            "node": "Google Drive: Download Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive: Download Report": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Send Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-10-04T00:00:00.000Z",
+  "versionId": "1"
+}

@@ -1,0 +1,161 @@
+{
+  "description": "Sample test data for CRM Lead Automation System",
+  "test_scenarios": [
+    {
+      "scenario": "Website Form Submission",
+      "endpoint": "POST /webhook/lead-capture",
+      "payload": {
+        "name": "Sarah Johnson",
+        "email": "sarah.johnson@techstartup.io",
+        "phone": "+1-555-0123",
+        "company": "TechStartup Inc",
+        "message": "We're interested in your enterprise solution for our growing team of 50+ people. Can we schedule a demo?",
+        "source": "webhook"
+      }
+    },
+    {
+      "scenario": "Website Form Submission #2",
+      "endpoint": "POST /webhook/lead-capture",
+      "payload": {
+        "name": "Michael Chen",
+        "email": "m.chen@innovativesolutions.com",
+        "phone": "+1-555-0456",
+        "company": "Innovative Solutions LLC",
+        "message": "Looking for a CRM integration to automate our sales process. What pricing plans do you offer?",
+        "source": "webhook"
+      }
+    },
+    {
+      "scenario": "Email Lead Inquiry",
+      "description": "Simulated email received in Gmail inbox",
+      "email_data": {
+        "from": "David Martinez <david.martinez@globalcorp.com>",
+        "subject": "New Lead Inquiry",
+        "body": "Hello, I came across your company and I'm interested in learning more about your automation services. We're a mid-sized company looking to streamline our operations. Please contact me at your earliest convenience.",
+        "date": "2025-10-04T10:30:00Z"
+      }
+    },
+    {
+      "scenario": "Google Form Submission",
+      "description": "Lead submitted via Google Forms",
+      "form_responses": {
+        "Full Name": "Emily Rodriguez",
+        "Email": "emily.r@digitalagency.co",
+        "Phone": "+1-555-0789",
+        "Company": "Digital Agency Co",
+        "Message": "We need help automating our client onboarding process. Currently spending 10+ hours per week on manual data entry.",
+        "How did you hear about us?": "LinkedIn"
+      }
+    },
+    {
+      "scenario": "Google Form Submission #2",
+      "description": "Lead without phone/company info",
+      "form_responses": {
+        "Full Name": "James Wilson",
+        "Email Address": "james.wilson@freelancer.com",
+        "Message": "Freelance consultant interested in your automation templates for small businesses.",
+        "How did you hear about us?": "Google Search"
+      }
+    },
+    {
+      "scenario": "Website Form - High Priority Lead",
+      "endpoint": "POST /webhook/lead-capture",
+      "payload": {
+        "name": "Amanda Foster",
+        "email": "a.foster@enterprise500.com",
+        "phone": "+1-555-0999",
+        "company": "Enterprise 500 Corp",
+        "message": "VP of Sales here. We have a budget of $100K+ for automation solutions. Need to implement ASAP for our 200-person sales team. Please call me directly.",
+        "source": "webhook"
+      }
+    },
+    {
+      "scenario": "Email Lead - Existing Customer Follow-up",
+      "description": "Email from existing customer with new inquiry",
+      "email_data": {
+        "from": "Robert Thompson <r.thompson@returningclient.com>",
+        "subject": "New Lead Inquiry",
+        "body": "Hi team, we loved the previous automation you set up for us. Now we want to expand to our marketing department as well. Can we discuss adding more workflows?",
+        "date": "2025-10-04T14:15:00Z"
+      }
+    },
+    {
+      "scenario": "Website Form - International Lead",
+      "endpoint": "POST /webhook/lead-capture",
+      "payload": {
+        "name": "Sophie Dubois",
+        "email": "sophie.dubois@paristech.fr",
+        "phone": "+33-1-234-5678",
+        "company": "Paris Tech Solutions",
+        "message": "Bonjour! We are a French company looking to implement n8n automation for our European operations. Do you provide support in multiple languages?",
+        "source": "webhook"
+      }
+    },
+    {
+      "scenario": "Google Form - Competitor Research",
+      "description": "Potential lead doing competitive analysis",
+      "form_responses": {
+        "Full Name": "Alex Kumar",
+        "Email": "alex.kumar@competitorwatch.com",
+        "Phone": "+1-555-0321",
+        "Company": "Competitor Watch Inc",
+        "Message": "Researching automation solutions for comparison report. Can you send pricing and feature list?",
+        "How did you hear about us?": "Industry Report"
+      }
+    },
+    {
+      "scenario": "Website Form - Basic Inquiry",
+      "endpoint": "POST /webhook/lead-capture",
+      "payload": {
+        "name": "Lisa Anderson",
+        "email": "lisa.anderson@smallbiz.com",
+        "phone": "",
+        "company": "Small Biz Solutions",
+        "message": "Just starting to look into automation. What's the learning curve like for non-technical users?",
+        "source": "webhook"
+      }
+    }
+  ],
+  "curl_examples": [
+    {
+      "description": "Test Website Form Submission with curl",
+      "command": "curl -X POST https://your-n8n-instance.com/webhook/lead-capture \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"name\": \"Test User\",\n    \"email\": \"test@example.com\",\n    \"phone\": \"+1-555-0000\",\n    \"company\": \"Test Company\",\n    \"message\": \"This is a test lead submission\",\n    \"source\": \"webhook\"\n  }'"
+    }
+  ],
+  "expected_outcomes": {
+    "crm_entry": {
+      "platform": "HubSpot",
+      "fields": {
+        "contact_created": true,
+        "lifecycle_stage": "lead",
+        "lead_status": "New Lead",
+        "lead_source": "Tagged with source (Website Form, Email Inquiry, Google Form)",
+        "custom_properties": "first_contact_date, initial_message populated"
+      }
+    },
+    "automated_email": {
+      "sent_to": "Lead's email address",
+      "subject": "Thank you for reaching out!",
+      "content": "HTML formatted welcome email with 24-hour response promise"
+    },
+    "slack_notification": {
+      "channel": "Sales team channel",
+      "includes": "Lead name, email, phone, company, source, message, lead ID"
+    },
+    "asana_task": {
+      "task_name": "Call [Lead Name] about inquiry",
+      "due_date": "Tomorrow",
+      "notes": "Complete lead details with source and message",
+      "assigned_to": "Sales rep from environment variable"
+    },
+    "google_sheets_log": {
+      "spreadsheet": "Leads tracking sheet",
+      "columns": "Timestamp, Lead ID, Name, Email, Phone, Company, Source, Message, Status"
+    },
+    "weekly_report": {
+      "trigger": "Every Monday 9 AM",
+      "content": "Statistics, source breakdown, detailed lead list",
+      "delivery": "Email to manager with PDF attachment"
+    }
+  }
+}
